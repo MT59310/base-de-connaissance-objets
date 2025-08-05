@@ -1,42 +1,40 @@
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse
-import os
-import math
+from fastapi.responses import StreamingResponse
+import io
+import zipfile
 from PyPDF2 import PdfReader, PdfWriter
-import tempfile
-import shutil
 
 app = FastAPI()
 
 @app.post("/split-pdf/")
 async def split_pdf(file: UploadFile = File(...)):
-    # Créer un dossier temporaire
-    output_dir = tempfile.mkdtemp()
+    # Lecture du PDF
+    pdf_reader = PdfReader(file.file)
+    total_pages = len(pdf_reader.pages)
 
-    # Sauvegarder le PDF reçu
-    input_path = os.path.join(output_dir, file.filename)
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
+    # Création du fichier ZIP en mémoire
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        part_number = 1
+        pages_per_file = 50  # à ajuster selon la taille
+        for start in range(0, total_pages, pages_per_file):
+            pdf_writer = PdfWriter()
+            for page_num in range(start, min(start + pages_per_file, total_pages)):
+                pdf_writer.add_page(pdf_reader.pages[page_num])
 
-    # Lire le PDF
-    reader = PdfReader(input_path)
-    total_size = os.path.getsize(input_path)
+            # Sauvegarde en mémoire
+            pdf_bytes = io.BytesIO()
+            pdf_writer.write(pdf_bytes)
+            pdf_bytes.seek(0)
 
-    # Nombre de pages par bloc pour environ 10 Mo
-    pages_per_chunk = max(1, math.floor(len(reader.pages) / (total_size / (10 * 1024 * 1024))))
+            # Ajout au ZIP
+            zipf.writestr(f"part_{part_number}.pdf", pdf_bytes.read())
+            part_number += 1
 
-    chunk_paths = []
-    for start in range(0, len(reader.pages), pages_per_chunk):
-        writer = PdfWriter()
-        for page in range(start, min(start + pages_per_chunk, len(reader.pages))):
-            writer.add_page(reader.pages[page])
-
-        chunk_filename = f"{os.path.splitext(file.filename)[0]}_part_{(start // pages_per_chunk) + 1}.pdf"
-        chunk_path = os.path.join(output_dir, chunk_filename)
-        with open(chunk_path, "wb") as output_pdf:
-            writer.write(output_pdf)
-
-        chunk_paths.append(chunk_path)
-
-    return {"files": chunk_paths}
-
+    # Retour du ZIP en téléchargement
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=split_parts.zip"}
+    )
