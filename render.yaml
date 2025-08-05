@@ -1,8 +1,7 @@
 services:
   - type: web
-    name: base-de-connaissance-api
+    name: pdf-splitter
     env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     plan: free
-    buildCommand: ""
-    startCommand: "python main.py"
-    envVars: []
