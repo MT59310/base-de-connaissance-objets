@@ -39,4 +39,4 @@ async def split_pdf(file: UploadFile = File(...)):
         chunk_paths.append(chunk_path)
 
     return {"files": chunk_paths}
-Ajout code découpe PDF
+
