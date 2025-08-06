@@ -1,38 +1,59 @@
-import time  # <-- on ajoute cette importation
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse, JSONResponse
+from starlette.requests import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+import io
+import time
+import zipfile
+from PyPDF2 import PdfReader, PdfWriter
+
+app = FastAPI()
+
+# Middleware pour limiter la taille du fichier à 200 Mo
+class LimitSizeMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        body = await request.body()
+        max_size = 200 * 1024 * 1024  # 200 Mo
+        if len(body) > max_size:
+            return JSONResponse({"detail": "Fichier trop gros"}, status_code=413)
+        return await call_next(request)
+
+app.add_middleware(LimitSizeMiddleware)
 
 @app.post("/split-pdf/")
 async def split_pdf(file: UploadFile = File(...)):
-    start_time = time.time()  # <-- début du chrono
+    start_time = time.time()
 
-    # Lecture du PDF
-    pdf_reader = PdfReader(file.file)
+    # Lecture des données brutes
+    data = await file.read()
+    print("Taille fichier reçue:", len(data), "octets")
+
+    # Recharge le fichier pour PdfReader
+    file_stream = io.BytesIO(data)
+    pdf_reader = PdfReader(file_stream)
     total_pages = len(pdf_reader.pages)
 
-    # Création du fichier ZIP en mémoire
+    # Création du ZIP en mémoire
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         part_number = 1
-        pages_per_file = 50  # à ajuster selon la taille
+        pages_per_file = 50  # À ajuster selon ton besoin
         for start in range(0, total_pages, pages_per_file):
             pdf_writer = PdfWriter()
             for page_num in range(start, min(start + pages_per_file, total_pages)):
                 pdf_writer.add_page(pdf_reader.pages[page_num])
 
-            # Sauvegarde en mémoire
-            pdf_bytes = io.BytesIO()
-            pdf_writer.write(pdf_bytes)
-            pdf_bytes.seek(0)
+            part_bytes = io.BytesIO()
+            pdf_writer.write(part_bytes)
+            part_bytes.seek(0)
 
-            # Ajout au ZIP
-            zipf.writestr(f"part_{part_number}.pdf", pdf_bytes.read())
+            zipf.writestr(f"part_{part_number}.pdf", part_bytes.read())
             part_number += 1
 
-    # Retour du ZIP en téléchargement
     zip_buffer.seek(0)
+    elapsed_time = time.time() - start_time
 
-    elapsed_time = time.time() - start_time  # <-- fin du chrono
-
-    # On retourne aussi le temps de traitement dans l’en-tête HTTP
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
