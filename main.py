@@ -1,13 +1,9 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import StreamingResponse
-import io
-import zipfile
-from PyPDF2 import PdfReader, PdfWriter
-
-app = FastAPI()
+import time  # <-- on ajoute cette importation
 
 @app.post("/split-pdf/")
 async def split_pdf(file: UploadFile = File(...)):
+    start_time = time.time()  # <-- début du chrono
+
     # Lecture du PDF
     pdf_reader = PdfReader(file.file)
     total_pages = len(pdf_reader.pages)
@@ -33,8 +29,15 @@ async def split_pdf(file: UploadFile = File(...)):
 
     # Retour du ZIP en téléchargement
     zip_buffer.seek(0)
+
+    elapsed_time = time.time() - start_time  # <-- fin du chrono
+
+    # On retourne aussi le temps de traitement dans l’en-tête HTTP
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=split_parts.zip"}
+        headers={
+            "Content-Disposition": "attachment; filename=split_parts.zip",
+            "X-Processing-Time": f"{elapsed_time:.2f} seconds"
+        }
     )
